@@ -5,11 +5,11 @@ Markdown-native project board for the AI agent era.
 ```
 board list
 
-ID       │ TITLE                      │ STATUS      │ COLUMN    │ PRIORITY │ MILESTONE
-─────────┼────────────────────────────┼─────────────┼───────────┼──────────┼──────────
-00000001 │ virec_fusion               │ in-progress │ GAIA      │ high     │
-00000002 │ geo_spo                    │ in-progress │ CFFF      │ high     │ 2026-04-01
-00000003 │ atmocat                    │ backlog     │ AIStation │ medium   │
+ID       │ TITLE              │ STATUS      │ COLUMN  │ PRIORITY │ MILESTONE
+─────────┼────────────────────┼─────────────┼─────────┼──────────┼──────────
+00000001 │ recommendation-api │ in-progress │ Backend │ high     │ 2026-04-01
+00000002 │ search-reindex     │ todo        │ Infra   │ medium   │
+00000003 │ landing-page       │ backlog     │ Frontend│ low      │
 ```
 
 ## Install
@@ -69,7 +69,7 @@ title: Build recommendation engine
 description: Core rec engine for video platform
 id: "00000001"
 status: in-progress
-column: GAIA
+column: Backend
 priority: high
 current_task: Training baseline model
 created: 2026-03-20
@@ -100,12 +100,29 @@ board init --with obsidian     # enable during init
 
 ### Obsidian — visual kanban board
 
+**1. Install Obsidian** (if you don't have it):
+
 ```bash
-board init --with obsidian   # creates .obsidian/ config
-board open                   # launch Obsidian
+# macOS
+brew install --cask obsidian
+
+# Or download from https://obsidian.md/download
 ```
 
-Install the [Kanban plugin](https://github.com/mgmeyers/obsidian-kanban) in Obsidian for a drag-and-drop board view grouped by column.
+**2. Enable the plugin and open your board:**
+
+```bash
+board init --with obsidian   # creates .obsidian/ config with property types
+board open                   # launch Obsidian (registers vault automatically)
+```
+
+**3. Install Kanban plugin** (one-time, inside Obsidian):
+
+- `Cmd+,` (Settings) → Community plugins → Turn off Safe Mode
+- Browse → search **Kanban** → Install → Enable
+
+**4. Done.** Open `board/kanban.md` in Obsidian to see your drag-and-drop kanban board.
+Cards link to task files — click to see full details and notes.
 
 ### ntfy — push notifications (default)
 
