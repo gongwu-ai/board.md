@@ -19,6 +19,7 @@ from board_md.store import (
 from board_md.render import render_table, render_json, render_detail
 from board_md import notify
 from board_md.skills import inject_skills, clean_skills, TOOL_CONFIGS
+from board_md import plugins
 
 app = typer.Typer(
     name="board",
@@ -62,11 +63,12 @@ def _resolve_task(board: Path, task_id: str) -> dict:
 def init(
     skip_skills: bool = typer.Option(False, "--skip-skills", help="Don't generate agent skill files"),
     tools: Optional[List[str]] = typer.Option(None, "--tool", help=f"Agent tools to generate for (default: all). Choices: {', '.join(TOOL_CONFIGS)}"),
+    with_plugins: Optional[List[str]] = typer.Option(None, "--with", help="Enable plugins (obsidian, feishu, ntfy)"),
 ):
     """Initialize a board in the current directory.
 
-    Creates board/ for task files and writes SKILL.md into each AI tool's
-    native discovery directory (.claude/skills/, .codex/skills/, etc.).
+    Creates board/ for task files, writes SKILL.md into each AI tool's
+    native discovery directory, and optionally enables plugins.
     """
     cwd = Path.cwd()
     board = init_board(cwd)
@@ -77,6 +79,20 @@ def init(
         for path in created:
             typer.echo(f"  wrote {path}")
         typer.echo(f"Agent skills injected for {len(created)} tool(s).")
+
+    if with_plugins:
+        for plugin_name in with_plugins:
+            created = plugins.init_plugin(plugin_name, cwd)
+            if created:
+                for path in created:
+                    typer.echo(f"  wrote {path}")
+                typer.echo(f"Plugin '{plugin_name}' enabled.")
+            else:
+                mod = plugins.get_plugin(plugin_name)
+                if mod:
+                    typer.echo(f"Plugin '{plugin_name}' enabled (no files to create).")
+                else:
+                    typer.echo(f"Unknown plugin: {plugin_name}", err=True)
 
 
 @app.command("add")
@@ -268,3 +284,74 @@ def config(
     cfg[key] = value
     config_file.write_text(json.dumps(cfg, indent=2) + "\n")
     typer.echo(f"Set {key} = {value}")
+
+
+@app.command("open")
+def open_cmd():
+    """Open the board in Obsidian (requires obsidian plugin)."""
+    obsidian = plugins.get_plugin("obsidian")
+    if obsidian is None:
+        typer.echo("Obsidian plugin not available.", err=True)
+        raise typer.Exit(1)
+
+    board = _find_board()
+    project_dir = board.parent
+
+    ok = obsidian.open_vault(project_dir)
+    if ok:
+        typer.echo(f"Opened {project_dir} in Obsidian")
+    else:
+        typer.echo(
+            "Could not open Obsidian. Is it installed?\n"
+            "  macOS: brew install --cask obsidian\n"
+            "  Manual: https://obsidian.md/download",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+
+# --- Plugin management ---
+
+plugin_app = typer.Typer(help="Manage board.md plugins.")
+app.add_typer(plugin_app, name="plugin")
+
+
+@plugin_app.command("list")
+def plugin_list():
+    """List available plugins."""
+    for name, desc in plugins.list_plugins().items():
+        typer.echo(f"  {name:12s} {desc}")
+
+
+@plugin_app.command("enable")
+def plugin_enable(
+    name: str = typer.Argument(..., help="Plugin name"),
+):
+    """Enable a plugin in the current project."""
+    board = _find_board()
+    project_dir = board.parent
+
+    mod = plugins.get_plugin(name)
+    if mod is None:
+        typer.echo(f"Unknown plugin: {name}", err=True)
+        raise typer.Exit(1)
+
+    created = plugins.init_plugin(name, project_dir)
+    for path in created:
+        typer.echo(f"  wrote {path}")
+    typer.echo(f"Plugin '{name}' enabled.")
+
+
+@plugin_app.command("disable")
+def plugin_disable(
+    name: str = typer.Argument(..., help="Plugin name"),
+):
+    """Disable a plugin (remove its files)."""
+    board = _find_board()
+    project_dir = board.parent
+
+    removed = plugins.clean_plugin(name, project_dir)
+    if removed:
+        for path in removed:
+            typer.echo(f"  removed {path}")
+    typer.echo(f"Plugin '{name}' disabled.")

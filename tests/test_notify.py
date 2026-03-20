@@ -1,12 +1,12 @@
-"""Tests for pluggable notification backends."""
+"""Tests for notification dispatcher + plugin backends."""
 
 from unittest.mock import patch, MagicMock
 from board_md import notify
 
 
 def test_send_ntfy():
-    """ntfy backend constructs correct HTTP request."""
-    with patch("board_md.notify.urllib.request.urlopen") as mock_urlopen:
+    """ntfy plugin constructs correct HTTP request."""
+    with patch("board_md.plugins.ntfy.urllib.request.urlopen") as mock_urlopen:
         mock_resp = MagicMock()
         mock_resp.status = 200
         mock_resp.__enter__ = MagicMock(return_value=mock_resp)
@@ -24,7 +24,7 @@ def test_send_ntfy():
 
 
 def test_send_ntfy_with_delay():
-    with patch("board_md.notify.urllib.request.urlopen") as mock_urlopen:
+    with patch("board_md.plugins.ntfy.urllib.request.urlopen") as mock_urlopen:
         mock_resp = MagicMock()
         mock_resp.status = 200
         mock_resp.__enter__ = MagicMock(return_value=mock_resp)
@@ -38,7 +38,7 @@ def test_send_ntfy_with_delay():
 
 
 def test_send_ntfy_failure():
-    with patch("board_md.notify.urllib.request.urlopen") as mock_urlopen:
+    with patch("board_md.plugins.ntfy.urllib.request.urlopen") as mock_urlopen:
         mock_urlopen.side_effect = OSError("network error")
         config = {"notify_backend": "ntfy", "ntfy_topic": "t"}
         result = notify.send(config, "msg")
@@ -46,8 +46,8 @@ def test_send_ntfy_failure():
 
 
 def test_send_feishu():
-    """feishu backend sends correct JSON payload."""
-    with patch("board_md.notify.urllib.request.urlopen") as mock_urlopen:
+    """feishu plugin sends correct JSON payload."""
+    with patch("board_md.plugins.feishu.urllib.request.urlopen") as mock_urlopen:
         mock_resp = MagicMock()
         mock_resp.read.return_value = b'{"code": 0}'
         mock_resp.__enter__ = MagicMock(return_value=mock_resp)
@@ -66,7 +66,7 @@ def test_send_feishu():
 
 
 def test_send_feishu_failure():
-    with patch("board_md.notify.urllib.request.urlopen") as mock_urlopen:
+    with patch("board_md.plugins.feishu.urllib.request.urlopen") as mock_urlopen:
         mock_urlopen.side_effect = OSError("connection refused")
         config = {
             "notify_backend": "feishu",
