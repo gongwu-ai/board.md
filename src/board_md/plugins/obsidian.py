@@ -123,24 +123,17 @@ def open_vault(project_dir: Path) -> bool:
     vault_path = str(project_dir.resolve())
 
     if system == "Darwin":
-        # macOS: try URI scheme, then direct app launch
+        # macOS: open -a Obsidian <path> works for both new and existing vaults.
+        # It registers the vault automatically on first open.
         try:
             subprocess.run(
-                ["open", f"obsidian://open?path={vault_path}"],
+                ["open", "-a", "Obsidian", vault_path],
                 check=True,
                 capture_output=True,
             )
             return True
         except subprocess.CalledProcessError:
-            try:
-                subprocess.run(
-                    ["open", "-a", "Obsidian", vault_path],
-                    check=True,
-                    capture_output=True,
-                )
-                return True
-            except subprocess.CalledProcessError:
-                return False
+            return False
 
     elif system == "Linux":
         try:
