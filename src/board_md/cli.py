@@ -18,6 +18,7 @@ from board_md.store import (
 )
 from board_md.render import render_table, render_json, render_detail
 from board_md import notify
+from board_md.skills import inject_skills, clean_skills, TOOL_CONFIGS
 
 app = typer.Typer(
     name="board",
@@ -58,10 +59,24 @@ def _resolve_task(board: Path, task_id: str) -> dict:
 
 
 @app.command()
-def init():
-    """Initialize a board in the current directory."""
-    board = init_board(Path.cwd())
+def init(
+    skip_skills: bool = typer.Option(False, "--skip-skills", help="Don't generate agent skill files"),
+    tools: Optional[List[str]] = typer.Option(None, "--tool", help=f"Agent tools to generate for (default: all). Choices: {', '.join(TOOL_CONFIGS)}"),
+):
+    """Initialize a board in the current directory.
+
+    Creates board/ for task files and writes SKILL.md into each AI tool's
+    native discovery directory (.claude/skills/, .codex/skills/, etc.).
+    """
+    cwd = Path.cwd()
+    board = init_board(cwd)
     typer.echo(f"Initialized board at {board}/")
+
+    if not skip_skills:
+        created = inject_skills(cwd, tools=tools)
+        for path in created:
+            typer.echo(f"  wrote {path}")
+        typer.echo(f"Agent skills injected for {len(created)} tool(s).")
 
 
 @app.command("add")
