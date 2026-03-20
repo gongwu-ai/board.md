@@ -8,59 +8,59 @@ status: active
 
 每个选型都登记 decision / rationale / boundary，方便后续复审和社区讨论。
 
-## D01: CLI 框架 — click
+## D01: CLI 框架 — typer
 
-- **Decision**: 用 `click`，不用 `typer`
-- **Rationale**: typer 是 click 的 wrapper，多一层间接 + 多一个依赖，但没带来实际收益。click 更显式，调试更透明。
-- **Boundary**: typer 的 type-hint 自动补全确实更优雅。如果未来 CLI 参数变复杂（嵌套子命令、动态选项），可能值得重新评估。
+- **Decision**: 用 `typer`
+- **Rationale**: type-hint 驱动的参数声明，自动生成 `--help`，自动补全。比 click 更符合现代 Python 风格。typer 底层仍是 click，稳定性有保证。
+- **Boundary**: typer 在 Python 3.9 下不能用 `from __future__ import annotations`（运行时需检查类型注解），cli.py 必须显式写 `Optional[str]`。如果后续提升到 3.10+ 可以简化。
 
 ## D02: YAML+Markdown 解析 — python-frontmatter
 
-- **Decision**: 用 `python-frontmatter` 库
-- **Rationale**: 这个库就是干"YAML frontmatter + markdown body"这件事的，成熟稳定，API 简洁。
+- **Decision**: 用 `python-frontmatter` 库，task schema 含 `description` 字段
+- **Rationale**: 标准库干标准事。`description` 提供一行式任务摘要，区别于 `title`（名称）和 body（详细笔记）。
 - **Boundary**: 不保留 YAML 注释（底层用 PyYAML）。如果用户手写注释被吞掉会不会引发抱怨？`ruamel.yaml` 可以保留注释但引入更重的依赖。
 
-## D03: 表格输出 — 自写 ASCII
+## D03: 表格输出 — 自写 ASCII + wcwidth CJK 对齐
 
-- **Decision**: 自己画 `│` `─` 表格，不依赖 `rich`
-- **Rationale**: 少一个依赖 = 安装更轻、攻击面更小。board.md 的表格够简单，不需要颜色/emoji 渲染。
-- **Boundary**: 中文字符宽度计算目前用 `len()`，CJK 字符实际占 2 列宽，表格对齐会跑偏。如果中文用户多，需要引入 `wcwidth` 或 `unicodedata.east_asian_width` 修正。
+- **Decision**: 自己画 `│` `─` 表格，用 `wcwidth` 计算 CJK 字符显示宽度
+- **Rationale**: 少一个重型依赖（不引入 `rich`），但正确处理中文/日文/韩文双宽字符对齐。
+- **Boundary**: 目前是纯 CLI 文本输出，没有可视化看板 UI。如果需要看板视图，可考虑：(a) 生成静态 HTML 看板，(b) 与 Obsidian Kanban 插件兼容，(c) 作为独立 side project 提供 Web UI。board.md 本体不做 GUI。
 
-## D04: 通知后端 — ntfy.sh via stdlib urllib
+## D04: 通知后端 — pluggable（ntfy + 飞书）
 
-- **Decision**: 只支持 ntfy.sh，用标准库 `urllib` 发 HTTP POST
-- **Rationale**: 零额外依赖。ntfy.sh 零账号、零服务器、内置定时（`At` header），一行 curl 等效。
-- **Boundary**: ntfy.sh 是单一依赖方。如果 ntfy.sh 挂了或改 API，提醒就断了。后续可能需要 pluggable 后端（Telegram、飞书、Apprise），但现在不做（YAGNI）。
+- **Decision**: 支持多通知后端，通过 `.board.json` 中 `notify_backend` 字段切换。首批支持 ntfy.sh 和飞书 webhook。
+- **Rationale**: ntfy.sh 零账号零服务器，适合国际用户。飞书 webhook 是中文开发者生态的主流选择，且免费。两者都只需一个 HTTP POST。
+- **Boundary**: 飞书 webhook 不支持定时投递（`delay` 参数仅 ntfy 有效）。后续可扩展 Telegram、Discord、Apprise。新增后端只需在 `notify.py` 加一个 `_send_xxx()` 函数。
 
-## D05: 任务 ID — 3 位零填充自增
+## D05: 任务 ID — 8 位零填充自增 + 前缀匹配
 
-- **Decision**: `001`, `002`, ..., `999`，文件名 `{id}_{slug}.md`
-- **Rationale**: 简单、可排序、ls 自然有序、grep 友好。比 UUID 短得多，适合 CLI 手敲。
-- **Boundary**: 上限 999 个任务。对个人项目板绰绰有余，但如果有人用来管大项目就不够了。溢出时可以扩到 4 位（`0001`），但需要迁移已有文件名——这违反"不改数据格式"的承诺吗？不算，因为 ID 是文件名约定，不是 frontmatter schema。
+- **Decision**: `00000001`, `00000002`, ... 上限 99,999,999。支持前缀/简写：`board show 1` 自动解析为 `00000001`。
+- **Rationale**: 8 位足够任何规模。前缀匹配让日常使用仍然简短。如果前缀有歧义则报错提示。
+- **Boundary**: 前缀歧义在任务量大时会增多（`board show 1` 可能匹配 `10000000` 到 `19999999`）。实际上由于是自增的，只有在有 1 万+ 任务时才会出现，个人看板不太可能。
 
-## D06: 文件名 slug
+## D06: 文件名 slug — python-slugify + 可选自定义
 
-- **Decision**: `re.sub` 清洗 + 截断 40 字符
-- **Rationale**: 保证文件名合法，同时保留人可读性。
-- **Boundary**: 中文标题 slugify 后变成 `训练基线模型`（保留 unicode \w），不做拼音转换。这在 macOS/Linux 上没问题（UTF-8 文件系统），但 Windows 旧版 cmd 可能显示乱码。暂不处理。
+- **Decision**: 用 `python-slugify`（`allow_unicode=True`）自动生成 slug，同时支持 `--slug` 手动指定。AI agent 也可通过 AGENTS.md 规则直接提供 slug。
+- **Rationale**: python-slugify 是成熟的第三方库（10k+ stars），处理特殊字符、CJK 保留、截断等边界情况。不自己造轮子。
+- **Boundary**: `allow_unicode=True` 在 Windows 旧版 cmd 可能显示乱码。跨平台场景下可考虑 `allow_unicode=False`（转写为 ASCII），但会丢失中文可读性。
 
-## D07: current_task 存储位置 — frontmatter
+## D07: current_task — 双写（frontmatter + body section）
 
-- **Decision**: `current_task` 作为 frontmatter 字段，不写进 body 的 `## Current Task` section
-- **Rationale**: CLI 修改 frontmatter 是原子操作（读-改-写整个文件），修改 body 中的 section 需要做 markdown 解析和 section 定位，脆弱且容易破坏用户手写的内容。
-- **Boundary**: AGENTS.md 的 spec 示例里 `## Current Task` 在 body 中。两者有不一致。如果用户期望在 body 里看到 current task（比如用 Obsidian 浏览时），frontmatter 字段不够直观。可能需要在 `show` 命令或文件生成时把 frontmatter 的 `current_task` 渲染到 body。
+- **Decision**: `current_task` 同时写入 frontmatter（数据查询用）和 body 的 `## Current Task` section（人类阅读用）。更新时用 `_update_body_section()` 精准替换目标 section，保留其他 section（如 `## Notes`）。
+- **Rationale**: frontmatter 保证 CLI 查询的可靠性，body section 保证用 Obsidian/VS Code 打开文件时直接可读。两者一致性由 `update_task()` 函数维护。
+- **Boundary**: 如果用户手动编辑了 body 中的 `## Current Task` section 但没改 frontmatter，两者会不一致。frontmatter 始终是 source of truth，body 是展示层。AGENTS.md 中需明确这一约定。
 
 ## D08: Python 版本 — >=3.9
 
-- **Decision**: 支持 Python 3.9+
-- **Rationale**: 开发机系统 Python 是 3.9.6，用 `from __future__ import annotations` 兜住类型语法。
-- **Boundary**: 3.9 是 2025-10 EOL 的版本。pip 安装时不会报错但安全更新已停。长期应该提到 3.10+，但这会逼用户装 pyenv/nvm 等版本管理器，增加上手摩擦。
+- **Decision**: 支持 Python 3.9+，不要求用户安装新版 Python
+- **Rationale**: 降低上手摩擦。macOS 自带 Python 3.9，大量 Linux 发行版默认也是 3.9。`from __future__ import annotations` 兜住类型语法（但 cli.py 因 typer 运行时检查不能用）。
+- **Boundary**: 3.9 已 EOL（2025-10），安全更新已停。长期可能需要提到 3.10+。但作为轻量 CLI 工具，安全面小，可接受。
 
-## D09: 异常处理 — bare Exception (notify)
+## D09: 异常处理 — 精确 catch + logging.debug
 
-- **Decision**: `except Exception` catch 所有异常
-- **Rationale**: `urllib` 在不同错误场景下抛不同异常（URLError, HTTPError, OSError, timeout），mock 测试环境抛 `Exception`。catch 宽泛一些保证通知失败不会炸掉整个 CLI。
-- **Boundary**: 吞掉了所有异常，包括 bug 导致的 TypeError 等。调试时可能不方便。可以加 `logging.debug` 记录原始异常但不暴露给用户。
+- **Decision**: catch 具体异常类型（`URLError`, `HTTPError`, `OSError`, `ConnectionError`, `json.JSONDecodeError`），用 `logging.debug` 记录原始错误。
+- **Rationale**: 不吞掉非网络类 bug（如 TypeError），同时保证通知失败不会 crash CLI。开发者可通过 `PYTHONLOGLEVEL=DEBUG` 看到详细错误。
+- **Boundary**: 普通用户看不到 debug 日志。如果通知静默失败且用户不知道原因，可能困惑。后续可在 CLI 加 `--verbose` flag。
 
 ## D10: 不做 MCP
 

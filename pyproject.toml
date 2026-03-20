@@ -4,18 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "board-md"
-version = "0.1.0"
+version = "0.2.0"
 description = "Markdown-native project board for the AI agent era"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
 dependencies = [
-    "click>=8.0",
+    "typer>=0.9",
     "python-frontmatter>=1.1",
+    "python-slugify>=8.0",
+    "wcwidth>=0.2",
 ]
 
 [project.scripts]
-board = "board_md.cli:cli"
+board = "board_md.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/gongwu-ai/board.md"

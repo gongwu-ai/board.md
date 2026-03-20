@@ -1,19 +1,29 @@
-"""board.md CLI entry point."""
+"""board.md CLI entry point — built with typer."""
 
-from __future__ import annotations
+# NOTE: Do NOT use `from __future__ import annotations` here.
+# Typer inspects type annotations at runtime for CLI argument generation.
+# PEP 563 deferred annotations break this on Python 3.9.
 
 import json
+import logging
 import sys
 from pathlib import Path
+from typing import List, Optional
 
-import click
+import typer
 
 from board_md.store import (
     init_board, add_task, list_tasks, get_task,
     update_task, archive_task, search_tasks,
 )
 from board_md.render import render_table, render_json, render_detail
-from board_md.notify import send_notification
+from board_md import notify
+
+app = typer.Typer(
+    name="board",
+    help="board.md — Markdown-native project board.",
+    no_args_is_help=True,
+)
 
 
 def _find_board() -> Path:
@@ -35,55 +45,65 @@ def _load_config() -> dict:
     return {}
 
 
-@click.group()
-@click.version_option(package_name="board-md")
-def cli():
-    """board.md — Markdown-native project board."""
-    pass
+def _resolve_task(board: Path, task_id: str) -> dict:
+    """Get task, handling not-found and ambiguous ID errors."""
+    try:
+        return get_task(board, task_id)
+    except FileNotFoundError:
+        typer.echo(f"Task {task_id} not found.", err=True)
+        raise typer.Exit(1)
+    except ValueError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
 
 
-@cli.command()
+@app.command()
 def init():
     """Initialize a board in the current directory."""
     board = init_board(Path.cwd())
-    click.echo(f"Initialized board at {board}/")
+    typer.echo(f"Initialized board at {board}/")
 
 
-@cli.command("add")
-@click.argument("title")
-@click.option("-s", "--status", default="backlog", help="Task status")
-@click.option("-c", "--column", default="", help="Board column")
-@click.option("-p", "--priority", default="medium", help="Priority (low/medium/high/critical)")
-@click.option("--host", default="", help="Associated host")
-@click.option("--path", default="", help="Project path")
-@click.option("--milestone", default="", help="Milestone date (YYYY-MM-DD)")
-@click.option("--milestone-name", default="", help="Milestone description")
-@click.option("-t", "--tag", multiple=True, help="Tags (repeatable)")
-def add_cmd(title, status, column, priority, host, path, milestone, milestone_name, tag):
+@app.command("add")
+def add_cmd(
+    title: str = typer.Argument(..., help="Task title"),
+    description: str = typer.Option("", "-d", "--description", help="One-line description"),
+    status: str = typer.Option("backlog", "-s", "--status", help="Task status"),
+    column: str = typer.Option("", "-c", "--column", help="Board column"),
+    priority: str = typer.Option("medium", "-p", "--priority", help="Priority (low/medium/high/critical)"),
+    host: str = typer.Option("", help="Associated host"),
+    path: str = typer.Option("", help="Project path"),
+    milestone: str = typer.Option("", help="Milestone date (YYYY-MM-DD)"),
+    milestone_name: str = typer.Option("", "--milestone-name", help="Milestone description"),
+    tag: Optional[List[str]] = typer.Option(None, "-t", "--tag", help="Tags (repeatable)"),
+    slug: Optional[str] = typer.Option(None, "--slug", help="Custom filename slug"),
+):
     """Add a new task."""
     board = _find_board()
     if not board.exists():
         board.mkdir(parents=True)
     task = add_task(
         board, title,
-        status=status, column=column, priority=priority,
-        host=host, path=path, milestone=milestone,
+        description=description, status=status, column=column,
+        priority=priority, host=host, path=path, milestone=milestone,
         milestone_name=milestone_name,
-        tags=list(tag) if tag else None,
+        tags=tag if tag else None,
+        slug=slug,
     )
-    click.echo(f"Created task {task['id']}: {title}")
+    typer.echo(f"Created task {task['id']}: {title}")
 
 
-@cli.command("list")
-@click.option("--json", "as_json", is_flag=True, help="JSON output")
-@click.option("-s", "--status", help="Filter by status")
-@click.option("-c", "--column", help="Filter by column")
-def list_cmd(as_json, status, column):
+@app.command("list")
+def list_cmd(
+    as_json: bool = typer.Option(False, "--json", help="JSON output"),
+    status: Optional[str] = typer.Option(None, "-s", "--status", help="Filter by status"),
+    column: Optional[str] = typer.Option(None, "-c", "--column", help="Filter by column"),
+):
     """List all tasks."""
     board = _find_board()
     if not board.exists():
-        click.echo("No board found. Run `board init` first.", err=True)
-        sys.exit(1)
+        typer.echo("No board found. Run `board init` first.", err=True)
+        raise typer.Exit(1)
 
     tasks = list_tasks(board)
     if status:
@@ -92,125 +112,136 @@ def list_cmd(as_json, status, column):
         tasks = [t for t in tasks if t.get("column") == column]
 
     if as_json:
-        click.echo(render_json(tasks))
+        typer.echo(render_json(tasks))
     else:
-        click.echo(render_table(tasks))
+        typer.echo(render_table(tasks))
 
 
-@cli.command("show")
-@click.argument("task_id")
-def show_cmd(task_id):
+@app.command("show")
+def show_cmd(
+    task_id: str = typer.Argument(..., help="Task ID (or prefix)"),
+):
     """Show task details."""
     board = _find_board()
-    try:
-        task = get_task(board, task_id)
-        click.echo(render_detail(task))
-    except FileNotFoundError:
-        click.echo(f"Task {task_id} not found.", err=True)
-        sys.exit(1)
+    task = _resolve_task(board, task_id)
+    typer.echo(render_detail(task))
 
 
-@cli.command("update")
-@click.argument("task_id")
-@click.option("-s", "--status", help="New status")
-@click.option("-t", "--task", "current_task", help="Current task description")
-@click.option("-c", "--column", help="Move to column")
-@click.option("-p", "--priority", help="Set priority")
-@click.option("--milestone", help="Milestone date")
-@click.option("--milestone-name", help="Milestone description")
-def update_cmd(task_id, status, current_task, column, priority, milestone, milestone_name):
+@app.command("update")
+def update_cmd(
+    task_id: str = typer.Argument(..., help="Task ID (or prefix)"),
+    status: Optional[str] = typer.Option(None, "-s", "--status", help="New status"),
+    current_task: Optional[str] = typer.Option(None, "-t", "--task", help="Current task description"),
+    column: Optional[str] = typer.Option(None, "-c", "--column", help="Move to column"),
+    priority: Optional[str] = typer.Option(None, "-p", "--priority", help="Set priority"),
+    description: Optional[str] = typer.Option(None, "-d", "--description", help="Update description"),
+    milestone: Optional[str] = typer.Option(None, "--milestone", help="Milestone date"),
+    milestone_name: Optional[str] = typer.Option(None, "--milestone-name", help="Milestone description"),
+):
     """Update a task."""
     board = _find_board()
     kwargs = {}
-    if status:
+    if status is not None:
         kwargs["status"] = status
-    if current_task:
+    if current_task is not None:
         kwargs["current_task"] = current_task
-    if column:
+    if column is not None:
         kwargs["column"] = column
-    if priority:
+    if priority is not None:
         kwargs["priority"] = priority
-    if milestone:
+    if description is not None:
+        kwargs["description"] = description
+    if milestone is not None:
         kwargs["milestone"] = milestone
-    if milestone_name:
+    if milestone_name is not None:
         kwargs["milestone_name"] = milestone_name
 
     if not kwargs:
-        click.echo("Nothing to update. Use --help for options.", err=True)
-        sys.exit(1)
+        typer.echo("Nothing to update. Use --help for options.", err=True)
+        raise typer.Exit(1)
 
     try:
         task = update_task(board, task_id, **kwargs)
-        click.echo(f"Updated task {task_id}: {task['title']}")
+        typer.echo(f"Updated task {task_id}: {task['title']}")
     except FileNotFoundError:
-        click.echo(f"Task {task_id} not found.", err=True)
-        sys.exit(1)
+        typer.echo(f"Task {task_id} not found.", err=True)
+        raise typer.Exit(1)
+    except ValueError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
 
 
-@cli.command()
-@click.argument("task_id")
-def archive(task_id):
+@app.command()
+def archive(
+    task_id: str = typer.Argument(..., help="Task ID (or prefix)"),
+):
     """Archive a task."""
     board = _find_board()
     try:
         archive_task(board, task_id)
-        click.echo(f"Archived task {task_id}")
+        typer.echo(f"Archived task {task_id}")
     except FileNotFoundError:
-        click.echo(f"Task {task_id} not found.", err=True)
-        sys.exit(1)
+        typer.echo(f"Task {task_id} not found.", err=True)
+        raise typer.Exit(1)
+    except ValueError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
 
 
-@cli.command()
-@click.argument("query")
-def search(query):
+@app.command()
+def search(
+    query: str = typer.Argument(..., help="Search keyword"),
+):
     """Search tasks by keyword."""
     board = _find_board()
     results = search_tasks(board, query)
     if results:
-        click.echo(render_table(results))
+        typer.echo(render_table(results))
     else:
-        click.echo("No matching tasks found.")
+        typer.echo("No matching tasks found.")
 
 
-@cli.command()
-@click.argument("task_id")
-@click.argument("when")
-@click.argument("message", required=False)
-def remind(task_id, when, message):
-    """Set a reminder for a task via ntfy.sh.
-
-    WHEN can be a delay (30m, 2h) or an absolute time (2026-04-01T09:00).
-    """
+@app.command()
+def remind(
+    task_id: str = typer.Argument(..., help="Task ID (or prefix)"),
+    when: str = typer.Argument(..., help="Delay (30m, 2h) or absolute time"),
+    message: Optional[str] = typer.Argument(None, help="Custom message"),
+):
+    """Set a reminder for a task via configured notification backend."""
     config = _load_config()
-    topic = config.get("ntfy_topic")
-    if not topic:
-        click.echo(
+    backend = config.get("notify_backend", "ntfy")
+
+    if backend == "ntfy" and not config.get("ntfy_topic"):
+        typer.echo(
             "No ntfy topic configured. Run: board config ntfy-topic <your-topic>",
             err=True,
         )
-        sys.exit(1)
+        raise typer.Exit(1)
+    if backend == "feishu" and not config.get("feishu_webhook"):
+        typer.echo(
+            "No feishu webhook configured. Run: board config feishu-webhook <url>",
+            err=True,
+        )
+        raise typer.Exit(1)
 
     board = _find_board()
-    try:
-        task = get_task(board, task_id)
-    except FileNotFoundError:
-        click.echo(f"Task {task_id} not found.", err=True)
-        sys.exit(1)
+    task = _resolve_task(board, task_id)
 
     msg = message or f"Reminder: {task['title']}"
-    ok = send_notification(topic, msg, title=f"board.md [{task_id}]", delay=when)
+    ok = notify.send(config, msg, title=f"board.md [{task_id}]", delay=when)
     if ok:
-        click.echo(f"Reminder set: {when} → {msg}")
+        typer.echo(f"Reminder set: {when} → {msg}")
     else:
-        click.echo("Failed to send notification.", err=True)
-        sys.exit(1)
+        typer.echo("Failed to send notification.", err=True)
+        raise typer.Exit(1)
 
 
-@cli.command()
-@click.argument("key")
-@click.argument("value")
-def config(key, value):
-    """Set board configuration (e.g., ntfy-topic)."""
+@app.command()
+def config(
+    key: str = typer.Argument(..., help="Config key (e.g., ntfy-topic, feishu-webhook, notify-backend)"),
+    value: str = typer.Argument(..., help="Config value"),
+):
+    """Set board configuration."""
     board = _find_board()
     config_file = board.parent / ".board.json"
 
@@ -221,4 +252,4 @@ def config(key, value):
     key = key.replace("-", "_")
     cfg[key] = value
     config_file.write_text(json.dumps(cfg, indent=2) + "\n")
-    click.echo(f"Set {key} = {value}")
+    typer.echo(f"Set {key} = {value}")
