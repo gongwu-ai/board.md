@@ -5,38 +5,17 @@ Markdown-native project board for the AI agent era.
 ```
 board list
 
- ID  │ Title            │ Status      │ Column    │ Priority │ Milestone
-─────┼──────────────────┼─────────────┼───────────┼──────────┼──────────
- 001 │ geo_spo          │ in-progress │ CFFF      │ high     │ 2026-04-01
- 002 │ virec_fusion     │ in-progress │ GAIA      │ high     │
- 003 │ atmocat          │ blocked     │ AIStation │ medium   │
+ID       │ TITLE                      │ STATUS      │ COLUMN    │ PRIORITY │ MILESTONE
+─────────┼────────────────────────────┼─────────────┼───────────┼──────────┼──────────
+00000001 │ virec_fusion               │ in-progress │ GAIA      │ high     │
+00000002 │ geo_spo                    │ in-progress │ CFFF      │ high     │ 2026-04-01
+00000003 │ atmocat                    │ backlog     │ AIStation │ medium   │
 ```
-
-## Philosophy
-
-**board.md does six things. Not seven.**
-
-1. **Store tasks as markdown files** — `board/*.md`, YAML frontmatter + freeform notes
-2. **List/filter/search** — table view, JSON output, full-text search
-3. **Update status** — via CLI, keeps timestamps consistent
-4. **Remind** — deadline notifications via [ntfy.sh](https://ntfy.sh) (zero server, zero account)
-5. **Work with any AI agent** — Claude Code, Codex, Cursor, Gemini CLI read `AGENTS.md`
-6. **Work with any editor** — Obsidian, VS Code, vim, cat — it's just `.md` files
-
-### What board.md does NOT do
-
-- **No GUI** — build one if you want, we won't
-- **No server, no database** — your filesystem is the database, git is the sync
-- **No MCP** — CLI is 35x cheaper for AI agents ([source](https://www.scalekit.com/blog/mcp-vs-cli-use))
-- **No plugin for any app** — we are a standalone CLI, not a parasite
-- **No data format changes** — markdown + YAML frontmatter, v1 to v100
-
-If we stop maintaining this tomorrow, your data is still a folder of `.md` files. Zero loss.
 
 ## Install
 
 ```bash
-# TODO: pip install board.md / brew install board.md / cargo install board.md
+pip install board-md
 ```
 
 ## Quick Start
@@ -46,30 +25,53 @@ If we stop maintaining this tomorrow, your data is still a folder of `.md` files
 board init
 
 # Add a task
-board add "Build recommendation engine" --column GAIA --priority high
+board add "Build recommendation engine" -c GAIA -p high
 
 # Update progress
-board update 001 -t "Training baseline model" -s in-progress
+board update 1 -t "Training baseline model" -s in-progress
 
-# Set a reminder (requires ntfy.sh app on your phone)
-board remind 001 24h "Baseline training should be done"
+# Set a reminder
+board remind 1 24h "Baseline training should be done"
 
 # List all tasks
 board list
-
-# AI agents use it the same way — via CLI or by reading AGENTS.md
+board list --json        # JSON output for scripts/agents
+board list -s in-progress  # filter by status
 ```
+
+## Philosophy
+
+**board.md does six things. Not seven.**
+
+1. **Store tasks as markdown files** — `board/*.md`, YAML frontmatter + freeform notes
+2. **List/filter/search** — table view, JSON output, full-text search
+3. **Update status** — via CLI, keeps timestamps consistent
+4. **Remind** — pluggable notification backends (ntfy.sh, Feishu)
+5. **Work with any AI agent** — auto-injects SKILL.md into Claude Code, Codex, Cursor, Gemini CLI, Copilot
+6. **Work with any editor** — Obsidian, VS Code, vim, cat — it's just `.md` files
+
+### What board.md does NOT do
+
+- **No GUI** — use Obsidian as a viewer (see Plugins below)
+- **No server, no database** — your filesystem is the database, git is the sync
+- **No MCP** — CLI is [35x cheaper](https://www.scalekit.com/blog/mcp-vs-cli-use) for AI agents
+- **No data format changes** — markdown + YAML frontmatter, v1 to v100
+
+If we stop maintaining this tomorrow, your data is still a folder of `.md` files.
 
 ## Data Format
 
-Each task lives in `board/<id>_<slug>.md`:
+Each task lives in `board/{id}_{slug}.md`:
 
 ```yaml
 ---
 title: Build recommendation engine
+description: Core rec engine for video platform
+id: "00000001"
 status: in-progress
 column: GAIA
 priority: high
+current_task: Training baseline model
 created: 2026-03-20
 updated: 2026-03-20
 ---
@@ -80,34 +82,78 @@ Training baseline model on MovieLens dataset.
 
 ## Notes
 
-- Using collaborative filtering as baseline
-- GPU allocated on GAIA: 2x A100
+Free-form markdown. Your knowledge base lives here.
 ```
 
-Human-readable. Git-diffable. Editor-agnostic. Agent-friendly.
+IDs are 8-digit zero-padded. Shorthand works: `board show 1` resolves to `board show 00000001`.
+
+## Plugins
+
+Plugins are opt-in integrations that keep the core clean.
+
+```bash
+board plugin list              # show available plugins
+board plugin enable obsidian   # enable a plugin
+board plugin disable feishu    # disable a plugin
+board init --with obsidian     # enable during init
+```
+
+### Obsidian — visual kanban board
+
+```bash
+board init --with obsidian   # creates .obsidian/ config
+board open                   # launch Obsidian
+```
+
+Install the [Kanban plugin](https://github.com/mgmeyers/obsidian-kanban) in Obsidian for a drag-and-drop board view grouped by column.
+
+### ntfy — push notifications (default)
+
+```bash
+board config notify-backend ntfy
+board config ntfy-topic my-secret-topic
+board remind 1 30m "Check training loss"
+```
+
+Zero account, zero server. Install [ntfy app](https://ntfy.sh) on your phone.
+
+### Feishu — 飞书 bot webhook
+
+```bash
+board config notify-backend feishu
+board config feishu-webhook https://open.feishu.cn/open-apis/bot/v2/hook/<token>
+board remind 1 now "实验跑完了"
+```
 
 ## AI Agent Integration
 
-board.md ships an `AGENTS.md` file — the emerging cross-tool standard (Linux Foundation / Agentic AI Foundation) supported by Codex, Cursor, Copilot, Gemini CLI, and others.
+`board init` auto-injects SKILL.md into each AI tool's native discovery directory:
 
-For Claude Code, symlink it: `ln -s AGENTS.md CLAUDE.md`
-
-No MCP server needed. Any agent that can call `bash` can use board.md.
-
-## Notifications
-
-board.md uses [ntfy.sh](https://ntfy.sh) for reminders — zero account, zero server:
-
-```bash
-# Set up your topic (one time)
-board config ntfy-topic my-secret-board-topic
-
-# Then reminders just work
-board remind 001 30m "Check training loss"
-board remind 002 2026-04-01T09:00 "Milestone deadline"
+```
+.claude/skills/board-md/SKILL.md
+.codex/skills/board-md/SKILL.md
+.gemini/skills/board-md/SKILL.md
+.cursor/skills/board-md/SKILL.md
+.github/skills/board-md/SKILL.md
 ```
 
-Install the ntfy app on your phone → subscribe to your topic → done.
+No MCP server needed. Any agent that can call `bash` can use board.md. Follows the [Agent Skills specification](https://agentskills.io) and [AGENTS.md standard](https://agents.md) (Linux Foundation).
+
+## CLI Reference
+
+```
+board init [--with PLUGIN] [--skip-skills]   Initialize board
+board add TITLE [-c COL] [-p PRI] [-s STATUS] [-d DESC]  Add task
+board list [--json] [-s STATUS] [-c COLUMN]  List tasks
+board show ID                                Show details
+board update ID [-s STATUS] [-t TASK] [-c COL] [-p PRI]  Update task
+board archive ID                             Archive task
+board search QUERY                           Full-text search
+board remind ID WHEN [MESSAGE]               Set reminder
+board config KEY VALUE                       Set config
+board open                                   Open in Obsidian
+board plugin list|enable|disable             Manage plugins
+```
 
 ## License
 
