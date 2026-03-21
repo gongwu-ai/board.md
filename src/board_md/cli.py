@@ -286,6 +286,20 @@ def config(
     typer.echo(f"Set {key} = {value}")
 
 
+@app.command()
+def sync():
+    """Sync kanban.md from task card files (enriched with descriptions, checklists)."""
+    obsidian = plugins.get_plugin("obsidian")
+    if obsidian is None:
+        typer.echo("Obsidian plugin not available.", err=True)
+        raise typer.Exit(1)
+
+    board = _find_board()
+    project_dir = board.parent
+    kanban_path = obsidian.sync_kanban(project_dir)
+    typer.echo(f"Synced {kanban_path}")
+
+
 @app.command("open")
 def open_cmd():
     """Open the board in Obsidian (requires obsidian plugin)."""

@@ -153,6 +153,129 @@ def test_cli_plugin_list(tmp_path, monkeypatch):
     assert "feishu" in result.output
 
 
+def _make_task(board_dir, task_id, title, column, priority="medium",
+               description="", milestone="", milestone_name="", body=""):
+    """Helper: write a task card file."""
+    import frontmatter as fm
+    meta = {"title": title, "id": task_id, "status": "in-progress",
+            "column": column, "priority": priority, "created": "2026-03-21",
+            "updated": "2026-03-21"}
+    if description:
+        meta["description"] = description
+    if milestone:
+        meta["milestone"] = milestone
+    if milestone_name:
+        meta["milestone_name"] = milestone_name
+    post = fm.Post(body, **meta)
+    slug = title.lower().replace(" ", "-")
+    (board_dir / f"{task_id}_{slug}.md").write_text(fm.dumps(post))
+
+
+# --- sync_kanban ---
+
+def test_sync_kanban_basic(tmp_path):
+    """sync_kanban should generate kanban.md with enriched card content."""
+    board = tmp_path / "board"
+    board.mkdir()
+    _make_task(board, "00000001", "alpha", "Dev", priority="high",
+               description="First task")
+    _make_task(board, "00000002", "beta", "Dev", priority="low",
+               description="Second task")
+
+    mod = plugins.get_plugin("obsidian")
+    kanban = mod.sync_kanban(tmp_path)
+    text = kanban.read_text()
+
+    assert "## Dev" in text
+    assert "## Archive" in text
+    assert "[[00000001_alpha|alpha]] #high" in text
+    assert "[[00000002_beta|beta]] #low" in text
+    assert "\tFirst task" in text
+    assert "\tSecond task" in text
+
+
+def test_sync_kanban_milestone(tmp_path):
+    """Milestone should appear as bold date in card body."""
+    board = tmp_path / "board"
+    board.mkdir()
+    _make_task(board, "00000001", "release", "Work",
+               milestone="2026-04-21", milestone_name="paper deadline")
+
+    mod = plugins.get_plugin("obsidian")
+    mod.sync_kanban(tmp_path)
+    text = (tmp_path / "board" / "kanban.md").read_text()
+
+    assert "**2026-04-21** paper deadline" in text
+
+
+def test_sync_kanban_checklist(tmp_path):
+    """Body checklists should be pulled into kanban cards."""
+    board = tmp_path / "board"
+    board.mkdir()
+    body = "## Tasks\n\n- [ ] Do thing A\n- [x] Done thing B\n\nSome notes."
+    _make_task(board, "00000001", "checky", "Work", body=body)
+
+    mod = plugins.get_plugin("obsidian")
+    mod.sync_kanban(tmp_path)
+    text = (tmp_path / "board" / "kanban.md").read_text()
+
+    assert "\t- [ ] Do thing A" in text
+    assert "\t- [x] Done thing B" in text
+    assert "Some notes" not in text  # non-checklist body not included
+
+
+def test_sync_kanban_preserves_column_order(tmp_path):
+    """Existing column order should be preserved, new columns appended before Archive."""
+    board = tmp_path / "board"
+    board.mkdir()
+    # Write existing kanban.md with custom column order
+    (board / "kanban.md").write_text(
+        "---\nkanban-plugin: board\n---\n\n## Zebra\n\n## Alpha\n\n## Archive\n"
+    )
+    _make_task(board, "00000001", "z-task", "Zebra")
+    _make_task(board, "00000002", "a-task", "Alpha")
+    _make_task(board, "00000003", "n-task", "NewCol")
+
+    mod = plugins.get_plugin("obsidian")
+    mod.sync_kanban(tmp_path)
+    text = (tmp_path / "board" / "kanban.md").read_text()
+
+    # Zebra before Alpha (preserved), NewCol before Archive
+    z_pos = text.index("## Zebra")
+    a_pos = text.index("## Alpha")
+    n_pos = text.index("## NewCol")
+    ar_pos = text.index("## Archive")
+    assert z_pos < a_pos < n_pos < ar_pos
+
+
+def test_sync_kanban_medium_priority_no_tag(tmp_path):
+    """Medium priority should not get a tag."""
+    board = tmp_path / "board"
+    board.mkdir()
+    _make_task(board, "00000001", "mid", "Work", priority="medium")
+
+    mod = plugins.get_plugin("obsidian")
+    mod.sync_kanban(tmp_path)
+    text = (tmp_path / "board" / "kanban.md").read_text()
+
+    assert "[[00000001_mid|mid]]" in text
+    assert "#medium" not in text
+
+
+def test_cli_sync(tmp_path, monkeypatch):
+    """board sync CLI command should work."""
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["init", "--with", "obsidian"])
+    _make_task(tmp_path / "board", "00000001", "task-one", "Work",
+               description="hello")
+
+    result = runner.invoke(app, ["sync"])
+    assert result.exit_code == 0
+    assert "Synced" in result.output
+    text = (tmp_path / "board" / "kanban.md").read_text()
+    assert "hello" in text
+
+
 def test_cli_plugin_enable_disable(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     runner.invoke(app, ["init"])

@@ -9,9 +9,12 @@ from __future__ import annotations
 import json
 import logging
 import platform
+import re
 import subprocess
 from pathlib import Path
-from typing import List
+from typing import Dict, List
+
+import frontmatter
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +114,109 @@ def clean(project_dir: Path) -> List[str]:
             f.unlink()
             removed.append(f".obsidian/{name}")
     return removed
+
+
+def _render_card(task: Dict, filename: str) -> str:
+    """Render a single task as an enriched kanban card entry."""
+    slug = filename.rsplit(".", 1)[0]  # strip .md
+    title = task.get("title", slug)
+    priority = task.get("priority", "medium")
+
+    # Title line: - [ ] [[slug|title]] #priority
+    priority_tag = ""
+    if priority in ("high", "critical"):
+        priority_tag = f" #{priority}"
+    elif priority == "low":
+        priority_tag = " #low"
+
+    line = f"- [ ] [[{slug}|{title}]]{priority_tag}"
+    parts = [line]
+
+    # Description
+    desc = task.get("description", "")
+    if desc:
+        parts.append(f"\t{desc}")
+
+    # Milestone
+    milestone = task.get("milestone", "")
+    milestone_name = task.get("milestone_name", "")
+    if milestone:
+        ms_text = f"**{milestone}**"
+        if milestone_name:
+            ms_text += f" {milestone_name}"
+        parts.append(f"\t{ms_text}")
+
+    # Body checklists (extract - [ ] / - [x] lines from body)
+    body = task.get("body", "")
+    if body:
+        for m in re.finditer(r"^- \[[ x]\] .+$", body, re.MULTILINE):
+            parts.append(f"\t{m.group(0)}")
+
+    return "\n".join(parts)
+
+
+def _parse_existing_columns(kanban_path: Path) -> List[str]:
+    """Extract column order from an existing kanban.md."""
+    if not kanban_path.exists():
+        return []
+    text = kanban_path.read_text()
+    return re.findall(r"^## (.+)$", text, re.MULTILINE)
+
+
+def sync_kanban(project_dir: Path) -> Path:
+    """Generate or update kanban.md from all task card files.
+
+    Reads each board/*.md file, groups by column, and writes enriched
+    kanban.md with descriptions, milestones, and checklists.
+    Preserves existing column order; appends new columns before Archive.
+    """
+    board_dir = project_dir / "board"
+    kanban_path = board_dir / "kanban.md"
+
+    # Read all tasks
+    tasks = []
+    for f in sorted(board_dir.glob("[0-9]*_*.md")):
+        post = frontmatter.load(str(f))
+        tasks.append(dict(post.metadata, body=post.content, _filename=f.name))
+
+    # Group by column
+    by_column: Dict[str, List[Dict]] = {}
+    for t in tasks:
+        col = t.get("column", "") or "Uncategorized"
+        by_column.setdefault(col, []).append(t)
+
+    # Determine column order: preserve existing, append new before Archive
+    existing_columns = _parse_existing_columns(kanban_path)
+    # Ensure Archive is always last
+    if "Archive" in existing_columns:
+        existing_columns.remove("Archive")
+
+    all_columns = list(existing_columns)
+    for col in by_column:
+        if col not in all_columns and col != "Archive":
+            all_columns.append(col)
+    all_columns.append("Archive")
+
+    # Build kanban.md content
+    lines = [
+        "---",
+        "kanban-plugin: board",
+        "kanban-settings:",
+        "  show-checkboxes: false",
+        "  hide-tags-in-title: true",
+        "---",
+        "",
+    ]
+
+    for col in all_columns:
+        lines.append(f"## {col}")
+        lines.append("")
+        for t in by_column.get(col, []):
+            lines.append(_render_card(t, t["_filename"]))
+        lines.append("")
+
+    kanban_path.write_text("\n".join(lines))
+    return kanban_path
 
 
 def open_vault(project_dir: Path) -> bool:
